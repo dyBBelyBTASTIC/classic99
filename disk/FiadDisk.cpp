@@ -2522,7 +2522,7 @@ bool FiadDisk::ReadSector(FileInfo *pFile) {
 		return false;
 	}
 
-	// Zero buffer first
+	// Zero buffer first (confirmed the real TI controller does this)
     if (pFile->bUseCPU) {
         for (int i=0; i<256; i+=2) {
             wrword(pFile->DataBuffer+i, 0);

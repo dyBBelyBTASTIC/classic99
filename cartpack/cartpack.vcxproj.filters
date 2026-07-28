@@ -244,10 +244,10 @@
     <None Include="roms\XB29GEM_8.BIN">
       <Filter>DataFiles\ROMS</Filter>
     </None>
-    <None Include="roms\RXB2025_8.bin">
+    <None Include="roms\RXB2026_8.bin">
       <Filter>DataFiles\ROMS</Filter>
     </None>
-    <None Include="roms\RXB2025_G.bin">
+    <None Include="roms\RXB2026_G.bin">
       <Filter>DataFiles\ROMS</Filter>
     </None>
     <None Include="roms\ssa8.bin">
@@ -266,6 +266,12 @@
       <Filter>DataFiles\ROMS</Filter>
     </None>
     <None Include="roms\ZMOTIFC.bin">
+      <Filter>DataFiles\ROMS</Filter>
+    </None>
+    <None Include="roms\rickd8.bin">
+      <Filter>DataFiles\ROMS</Filter>
+    </None>
+    <None Include="roms\MINES32k_8.bin">
       <Filter>DataFiles\ROMS</Filter>
     </None>
   </ItemGroup>

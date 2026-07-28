@@ -353,6 +353,7 @@
     <None Include="roms\LOGOG.BIN" />
     <None Include="roms\MegaDemo8.bin" />
     <None Include="roms\MinChalG.Bin" />
+    <None Include="roms\MINES32k_8.bin" />
     <None Include="roms\MiniMemC.Bin" />
     <None Include="roms\MiniMemG.Bin" />
     <None Include="roms\MunchMnC.Bin" />
@@ -364,8 +365,9 @@
     <None Include="roms\PCardD.ROM" />
     <None Include="roms\PENNIES" />
     <None Include="roms\QUEST" />
-    <None Include="roms\RXB2025_8.bin" />
-    <None Include="roms\RXB2025_G.bin" />
+    <None Include="roms\rickd8.bin" />
+    <None Include="roms\RXB2026_8.bin" />
+    <None Include="roms\RXB2026_G.bin" />
     <None Include="roms\ScottAdams\ADVENTURE" />
     <None Include="roms\ScottAdams\AdventurePatchedG.bin" />
     <None Include="roms\ScottAdams\COUNT" />

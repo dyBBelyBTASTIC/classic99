@@ -5371,6 +5371,8 @@ void wvdpbyte(Word x, Byte c)
 					}
 					if (nReg == 47) {
 						// Palette control
+                        // Matthew: DPM will be reset automatically if any status register is read, 
+                        // or if DPM auto-increment is enabled and the palette address rolls over to zero.
 						bF18ADataPortMode = (nData & 0x80) != 0;
 						bF18AAutoIncPaletteReg = (nData & 0x40) != 0;
 						F18APaletteRegisterNo = nData & 0x3f;
@@ -5522,7 +5524,7 @@ void wvdpbyte(Word x, Byte c)
 				if ((!bF18AAutoIncPaletteReg) || (F18APaletteRegisterNo == 64)) {
 					bF18ADataPortMode = 0;
 					F18APaletteRegisterNo = 0;
-					debug_write("F18A Data port mode off (auto).");
+					debug_write("F18A Data port mode off (palette address wrap).");
 				}
 				F18APaletteRegisterData = -1;
 			}
