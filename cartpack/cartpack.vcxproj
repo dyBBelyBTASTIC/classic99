@@ -384,6 +384,7 @@
     <None Include="roms\ScottAdams\VOYAGE" />
     <None Include="roms\ssa8.bin" />
     <None Include="roms\stranger32KB8.bin" />
+    <None Include="roms\Taipan32K_8.bin" />
     <None Include="roms\TE-IIC.BIN" />
     <None Include="roms\TE-IIG.BIN" />
     <None Include="roms\TF3_8.bin" />

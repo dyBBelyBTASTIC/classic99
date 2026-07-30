@@ -274,6 +274,9 @@
     <None Include="roms\MINES32k_8.bin">
       <Filter>DataFiles\ROMS</Filter>
     </None>
+    <None Include="roms\Taipan32K_8.bin">
+      <Filter>DataFiles\ROMS</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="cartpack.rc">
