@@ -2396,3 +2396,9 @@ That will give you a 1MB RAMdisk, which is file backed. You will have to load th
 
 - bug fixes to SBR long filename support
 
+-----------------------------------------------
+
+8 Aug 2026
+
+- updated TAIPAN in cartpack
+- VDP addressing fixes for bad register sets that I had no idea I didn't already have in there ;)

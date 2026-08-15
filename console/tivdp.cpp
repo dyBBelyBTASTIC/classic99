@@ -486,6 +486,13 @@ int gettables(int isLayer2)
         }
 	}
 
+    // in all of these cases, the addresses are restricted to the actual 16k memory space (even with F18A active)
+    SIT &= 0x3fff;
+	SAL &= 0x3fff;
+	SDT &= 0x3fff;
+    CT &= 0x3fff;
+	PDT &= 0x3fff;
+
     return reg0;
 }
 
@@ -1234,12 +1241,62 @@ void VDPtext(int scanline, int isLayer2)
 
             if ((bF18AActive) && (VDPREG[50]&0x02)) {
                 // per-cell attributes, so update the colors
+                // NOTE: TheMole detected that the page mode bits, which I don't currently support, play
+                // a role in the attribute table lookup. I can't tell from his description if the resulting
+                // address is intuitive (ie: you changed page, of course the attributes changed with it)
+                // or some kind of weird side effect. Unfortunately his test app only applies to graphics
+                // mode, and I don't do attributes there today, so I'm just going to assume it maps the same
+                // here and if it doesn't break anything (my only test being the Phoenix menu), I'll keep it
+                // for now. https://forums.atariage.com/topic/207586-f18a-programming-info-and-resources/page/34/#findComment-5871443
+                // Presumably we do this in graphics mode too.
+                // It's possible it doesn't work right in text mode anyway, something in the back of my head
+                // says Matt once commented that he didn't expect it to work. (the table sizes are too big for 0x400 offsets, for one?)
+                // TODO: take some time to understand the proposed js99er fix in the thread - why is it so much simpler?
+                // Seems he's taking the name table base address (nameTableAddr&0xfff) as the calculation, and just indexing
+                // the same point in the color table. Well, why would that ever be confusing? It's position based, of course
+                // it would be the same offset. What am I missing??
+                // And what the heck is the difference to what he was doing?
+
+// simplified:
+//                tileAttributeByte = getRAMByte(colorTable + (nameTableAddr - nameTableCanonicalBase) );
+//                tileAttributeByte = getRAMByte( (colorTable + (nameTableAddr & 0xfff)) );
+//
+// ... what is this masking? For one it wouldn't be big enough for an 80 column, 30 row text mode.
+// name table addresses are 1k - so 0x400. The masking doesn't make any sense?
+// moreover, his explanation is that the scroll table ORs in bits 0x400 and 0x800 (bits 10 and 11).
+// that masking collides with those bits, as does the range of legal name tables.
+// The final masking is just wraparound and always could have been used.
+// Presumably name table address has been calculated including the scrolling.
+// I think I'm going to disable this hack for now, it needs proper investigation.
+// I don't support the mode he developed it for anyway.
+// (added later: Anyway text mode doesn't support multiple pages.)
+
                 if (isLayer2) {
-                    t = VDP[VDPREG[11]*64 + o];
+                    int offset = VDPREG[11]*64;
+#if 0
+                    if (VDPREG[29] & 0x02) {
+                        // TODO: set to 2 pages horizontally, I don't even know if this works or scrolling works in text mode...
+                        offset |= (VDPREG[25]&0x80) ? 0x400 : 0;    // tile 2 horizontal scroll
+                    }
+                    if (VDPREG[29] & 0x01) {
+                        // TODO: set to 2 pages vertically, I don't even know if this works or scrolling works in text mode...
+                        offset |= (VDPREG[26]&0x80) ? 0x800: 0;     // tile 2 vertical scroll
+                    }
+#endif
+                    t = VDP[offset + o];
                     // BG is transparent (todo is that true?)
 	                fgc=t>>4;
                 } else {
-                    t = VDP[VDPREG[3]*64 + o];
+                    int offset = VDPREG[3]*64;
+#if 0
+                    if (VDPREG[29] & 0x02) {
+                        offset |= (VDPREG[27]&0x80) ? 0x400 : 0;    // tile 2 horizontal scroll
+                    }
+                    if (VDPREG[29] & 0x01) {
+                        offset |= (VDPREG[28]&0x80) ? 0x800: 0;     // tile 2 vertical scroll
+                    }
+#endif
+                    t = VDP[offset + o];
                 }
 	            bgc=t&0xf;
 	            fgc=t>>4;
@@ -2223,6 +2280,9 @@ void renderBML(int y) {
 	int bmy = VDPREG[34];
 	int bmw = VDPREG[35];
 	int bmh = VDPREG[36];
+
+    // check for full width
+    if (bmw == 0) bmw = 256;    // submitted by DDT
 
 	// non-fat bml is 2 bits per pixel, so each byte is 4 pixels
 	if ((y >= bmy)&&(y < bmy+bmh)) {

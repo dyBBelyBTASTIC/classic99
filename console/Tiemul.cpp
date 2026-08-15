@@ -5089,8 +5089,7 @@ int GetRealVDP() {
 	if ((bEnable80Columns) || (VDPREG[1]&0x80)) {
 		// 16k mode - address is 7 bits + 7 bits, so use it raw
 		// xx65 4321 0654 3210
-		// This mask is not really needed because VDPADD already tracks only 14 bits
-		RealVDP = VDPADD;	// & 0x3FFF;
+		RealVDP = VDPADD & 0x3FFF;
 
 		if (bEnable128k) {
 			RealVDP|=(VDPREG[14]&0x07)<<14;
@@ -5489,9 +5488,8 @@ void wvdpbyte(Word x, Byte c)
 				vdpprefetch=VDP[RealVDP];
 				vdpprefetchuninited = (VDPMemInited[RealVDP] == 0);
 				increment_vdpadd();
-			} else {
-				VDPADD&=0x3fff;			// writing or register, just mask the bits off
 			}
+			VDPADD&=0x3fff;			// writing or register, just mask the bits off
 		}
 		// verified on hardware - write register does not update the prefetch buffer
 	}
