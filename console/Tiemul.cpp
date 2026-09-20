@@ -104,6 +104,8 @@
 #include <shellapi.h>
 #include <atlstr.h>
 
+#pragma comment(lib, "shell32.lib")		// for CommandLineToArgvW, used by ParseCommandLine()
+
 #include "..\resource.h"
 #include "tiemul.h"
 #include "cpu9900.h"
@@ -218,6 +220,7 @@ bool gDisableDebugKeys = false;
 bool bIgnoreConsoleBreakpointHits = false;
 CRITICAL_SECTION debugCS;
 char g_cmdLine[512];
+int g_fCmdLineFullScreen = 0;								// -fullscreen command line switch: force full screen (DirectDraw exclusive) mode at startup
 extern bool bWarmBoot;
 extern FILE *fpDisasm;          // file pointer for logging disassembly, if active
 extern int disasmLogType;       // 0 = all, 1 = exclude < 2000, valid only when fpDisasm is not NULL
@@ -955,6 +958,11 @@ skiprestofuser:
 		StretchMode = STRETCH_FULL;
 		enableAltF4 = 1;	// by default, allow Alt+F4
 	}
+	// -fullscreen on the command line overrides whatever the INI says
+	if (g_fCmdLineFullScreen) {
+		StretchMode = STRETCH_FULL;
+		enableAltF4 = 1;	// by default, allow Alt+F4 so the user isn't stuck in exclusive full screen
+	}
 
     // the new application mode - this can only be set manually, it's not saved
     bEnableAppMode = GetPrivateProfileInt("AppMode", "EnableAppMode", bEnableAppMode, INIFILE);
@@ -1310,6 +1318,74 @@ void RestoreWindowPosition() {
 }
 
 ///////////////////////////////////
+// Command line handling
+///////////////////////////////////
+// Classic99's original command line handling (still down in readroms())
+// is very simple - the ENTIRE command line is either "-rom <path>" or a
+// bare path, with no support for multiple switches. To add new switches
+// (like -fullscreen) without breaking that legacy behavior, we parse the
+// command line here with the real Win32 tokenizer (CommandLineToArgvW,
+// which properly understands quoting), pull out anything we recognize,
+// and rebuild g_cmdLine from whatever's left over so the legacy code
+// downstream sees exactly what it always has.
+//
+// Recognized switches so far (case-insensitive, '-' or '/' prefix):
+//   -fullscreen     Start in full screen (exclusive DirectDraw) mode
+//
+// To add a new switch: add an "else if" below, and a global to hold
+// the result. Simple on/off flags can follow -fullscreen as a template.
+void ParseCommandLine() {
+	g_fCmdLineFullScreen = 0;
+
+	int argc = 0;
+	LPWSTR *argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
+	if (NULL == argvW) {
+		debug_write("CommandLineToArgvW failed, code %d", GetLastError());
+		return;
+	}
+
+	char rebuilt[sizeof(g_cmdLine)];
+	rebuilt[0] = '\0';
+
+	// argv[0] is our own executable path/name - skip it
+	for (int idx = 1; idx < argc; ++idx) {
+		char arg[512];
+		WideCharToMultiByte(CP_ACP, 0, argvW[idx], -1, arg, sizeof(arg), NULL, NULL);
+		arg[sizeof(arg)-1] = '\0';
+
+		if ((0 == _stricmp(arg, "-fullscreen")) || (0 == _stricmp(arg, "/fullscreen"))) {
+			g_fCmdLineFullScreen = 1;
+			debug_write("Command line: full screen requested");
+			continue;
+		}
+
+		// not a switch we recognize here - pass it through untouched so
+		// the legacy "-rom <file>" / bare filename handling still works
+		if (strlen(rebuilt) > 0) {
+			strncat(rebuilt, " ", sizeof(rebuilt)-strlen(rebuilt)-1);
+		}
+		// re-quote it if it contains a space, since the legacy parser
+		// just strips quote characters and expects one logical argument
+		if (NULL != strchr(arg, ' ')) {
+			strncat(rebuilt, "\"", sizeof(rebuilt)-strlen(rebuilt)-1);
+			strncat(rebuilt, arg, sizeof(rebuilt)-strlen(rebuilt)-1);
+			strncat(rebuilt, "\"", sizeof(rebuilt)-strlen(rebuilt)-1);
+		} else {
+			strncat(rebuilt, arg, sizeof(rebuilt)-strlen(rebuilt)-1);
+		}
+	}
+
+	LocalFree(argvW);
+
+	memset(g_cmdLine, 0, sizeof(g_cmdLine));
+	strncpy(g_cmdLine, rebuilt, sizeof(g_cmdLine));
+	g_cmdLine[sizeof(g_cmdLine)-1]='\0';
+	if (strlen(g_cmdLine) > 0) {
+		debug_write("Got command line: %s", g_cmdLine);
+	}
+}
+
+///////////////////////////////////
 // Main
 // Startup and shutdown system
 ///////////////////////////////////
@@ -1590,13 +1666,12 @@ int WINAPI WinMain( HINSTANCE hInst, HINSTANCE hInPrevInstance, LPSTR lpCmdLine,
 	debug_write("Classic99 version %s (C)2002-2024 M.Brent", VERSION);
 	debug_write("ROM files included under license from Texas Instruments");
 
-	// copy out the command line
-	memset(g_cmdLine, 0, sizeof(g_cmdLine));
-	if (NULL != lpCmdLine) {
-		strncpy(g_cmdLine, lpCmdLine, sizeof(g_cmdLine));
-		g_cmdLine[sizeof(g_cmdLine)-1]='\0';
-		debug_write("Got command line: %s", g_cmdLine);
-	}
+	// parse out the command line - fills in g_cmdLine with whatever's left
+	// over for the legacy "-rom <file>" handling, and sets our own flags
+	// (like -fullscreen) along the way. lpCmdLine itself isn't used
+	// directly anymore since CommandLineToArgvW gives much more reliable
+	// tokenizing (quoted paths, multiple switches, etc).
+	ParseCommandLine();
 	 
 	// Set default values for config (alphabetized here)
 	strcpy(AVIFileName, "C:\\Classic99.AVI");	// default movie filename
