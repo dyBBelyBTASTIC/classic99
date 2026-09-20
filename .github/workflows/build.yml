@@ -45,6 +45,24 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install ATL (needed for atlstr.h / CString)
+        shell: pwsh
+        run: |
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          Write-Host "VS install path: $vsPath"
+          $p = Start-Process -FilePath $installer -ArgumentList @(
+            "modify",
+            "--installPath", "`"$vsPath`"",
+            "--add", "Microsoft.VisualStudio.Component.VC.ATL",
+            "--quiet", "--norestart"
+          ) -Wait -PassThru
+          # 0 = success, 3010 = success but reboot suggested (fine on a CI runner)
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
+            throw "vs_installer failed with exit code $($p.ExitCode)"
+          }
+
       - name: Build classic99.sln (Release|${{ matrix.platform }})
         run: >
           msbuild classic99.sln
