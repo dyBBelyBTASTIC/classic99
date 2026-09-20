@@ -57,6 +57,7 @@ jobs:
           /p:Configuration=Release
           /p:Platform=${{ matrix.platform }}
           /p:PlatformToolset=v143
+          /p:UseOfATL=Static
           /nologo
           /verbosity:minimal
 
