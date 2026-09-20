@@ -1,0 +1,76 @@
+name: Build
+
+# Builds the classic99 solution on a hosted Windows runner.
+#
+# Why this needs a couple of overrides:
+#  - classic99.vcxproj and cartpack.vcxproj hardcode the "v141_xp" platform
+#    toolset (the Windows-XP-compatible variant of the VS2017 compiler).
+#    That XP add-on isn't installed on GitHub's runners (and hasn't been
+#    easily obtainable from Microsoft in years), so we override the
+#    toolset to v143 (VS2022, which the runner does have) at the command
+#    line. MSBuild global properties (-p: on the command line) can't be
+#    overridden back by the project file, so this cleanly wins over the
+#    hardcoded value without editing any .vcxproj files.
+#  - The project also hardcodes some old, machine-specific SDK paths
+#    (Windows SDK 7.1A, DirectX SDK June 2010). Those directories don't
+#    exist on the runner, but they're just extra entries tacked onto the
+#    normal include/lib search path, so the compiler quietly skips them
+#    and falls back to the regular Windows SDK that ships with the
+#    runner's Visual Studio install - nothing to do there.
+#
+# Win32 is built because it's the "complete" configuration - the x64
+# configuration doesn't build FilterDLL.dll or hq4xdll.dll at all (see
+# classic99.sln - they have no Build.0 entry for Release|x64), matching
+# how the project's own dist/classic99.zip ships fewer files under x64/.
+# x64 is still built here too, for parity with what's actually shipped.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Win32, x64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build classic99.sln (Release|${{ matrix.platform }})
+        run: >
+          msbuild classic99.sln
+          /m
+          /p:Configuration=Release
+          /p:Platform=${{ matrix.platform }}
+          /p:PlatformToolset=v143
+          /nologo
+          /verbosity:minimal
+
+      - name: Locate build output
+        id: outdir
+        shell: pwsh
+        run: |
+          # Win32 output lands in .\Release\, x64 lands in .\x64\Release\
+          if ("${{ matrix.platform }}" -eq "Win32") {
+            echo "path=Release" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "path=x64/Release" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: classic99-${{ matrix.platform }}-release
+          path: |
+            ${{ steps.outdir.outputs.path }}/*.exe
+            ${{ steps.outdir.outputs.path }}/*.dll
+          if-no-files-found: error
