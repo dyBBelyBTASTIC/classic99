@@ -88,7 +88,7 @@ jobs:
 
       - name: Build classic99.sln (Release|${{ matrix.platform }})
         run: >
-          "${{ steps.msbuild.outputs.path }}" classic99.sln
+          & "${{ steps.msbuild.outputs.path }}" classic99.sln
           /m
           /p:Configuration=Release
           /p:Platform=${{ matrix.platform }}
