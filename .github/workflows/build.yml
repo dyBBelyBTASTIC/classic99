@@ -33,6 +33,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -42,60 +43,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+      # We deliberately don't touch the pre-existing VS install on the
+      # runner (C:\Program Files\Microsoft Visual Studio\18\Enterprise) -
+      # trying to `modify` it in place proved flaky (invalid-argument and
+      # hang failures across several attempts). Instead we install a
+      # second, self-contained VS Build Tools instance with ATL included
+      # from the start, and point MSBuild at that one explicitly.
+      - name: Install a self-contained VS Build Tools with ATL
+        shell: cmd
+        run: >
+          choco install visualstudio2022-workload-vctools -y --no-progress
+          --package-parameters "--add Microsoft.VisualStudio.Component.VC.ATL --includeRecommended --quiet --norestart"
 
-      - name: Install ATL (needed for atlstr.h / CString)
+      - name: Locate MSBuild (the instance that actually has ATL)
+        id: msbuild
         shell: pwsh
         run: |
-          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          $vsPath = (& $vswhere -latest -products * -property installationPath).Trim()
-          Write-Host "Existing VS install path: $vsPath"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $instances = & $vswhere -all -products * -format json | ConvertFrom-Json
+          Write-Host "Found $($instances.Count) VS instance(s):"
+          $instances | ForEach-Object { Write-Host " - $($_.installationPath) ($($_.displayName) $($_.installationVersion))" }
 
-          Write-Host "----- vs_installer.exe --help -----"
-          & $installer --help 2>&1 | Out-String | Write-Host
-          Write-Host "------------------------------------"
-          Write-Host "----- vs_installer.exe modify --help -----"
-          & $installer modify --help 2>&1 | Out-String | Write-Host
-          Write-Host "------------------------------------"
-
-          $logPath = Join-Path $env:RUNNER_TEMP "vs_atl_install.log"
-          $installArgs = @(
-            "modify",
-            "--installPath", $vsPath,
-            "--add", "Microsoft.VisualStudio.Component.VC.ATL",
-            "--quiet",
-            "--norestart",
-            "--log", $logPath
-          )
-          Write-Host "Running: $installer $($installArgs -join ' ')"
-          $p = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-          Write-Host "vs_installer exit code: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
-            if (Test-Path $logPath) {
-              Write-Host "----- vs_installer log (tail) -----"
-              Get-Content $logPath -Tail 300
-              Write-Host "------------------------------------"
-            } else {
-              Write-Host "No log file found at $logPath"
+          $target = $null
+          foreach ($inst in $instances) {
+            $hit = Get-ChildItem -Path $inst.installationPath -Filter atlstr.h -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) {
+              Write-Host "ATL found under: $($inst.installationPath) -> $($hit.FullName)"
+              $target = $inst
+              break
             }
-            Write-Host "##[warning] vs_installer failed with exit code $($p.ExitCode) - see --help output above for correct syntax"
-            exit 0
+          }
+          if (-not $target) {
+            throw "No VS instance with ATL (atlstr.h) found among the $($instances.Count) instance(s) above"
           }
 
-          # Fail fast, right here, if it didn't actually take - don't wait
-          # for a wall of C1083 errors three steps later to find out.
-          $atl = Get-ChildItem -Path $vsPath -Filter atlstr.h -Recurse -ErrorAction SilentlyContinue
-          if (-not $atl) {
-            Write-Host "##[warning] atlstr.h still not found anywhere under $vsPath after modify"
-          } else {
-            Write-Host "Confirmed: $($atl[0].FullName)"
+          $msbuildPath = Get-ChildItem -Path $target.installationPath -Filter MSBuild.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\Current\\Bin\\' -or $_.FullName -match '\\Bin\\' } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $msbuildPath) {
+            throw "Found a VS instance with ATL at $($target.installationPath) but couldn't locate MSBuild.exe under it"
           }
+          Write-Host "Using MSBuild: $msbuildPath"
+          echo "path=$msbuildPath" >> $env:GITHUB_OUTPUT
 
       - name: Build classic99.sln (Release|${{ matrix.platform }})
         run: >
-          msbuild classic99.sln
+          "${{ steps.msbuild.outputs.path }}" classic99.sln
           /m
           /p:Configuration=Release
           /p:Platform=${{ matrix.platform }}
