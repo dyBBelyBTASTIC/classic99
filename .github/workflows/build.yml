@@ -53,17 +53,26 @@ jobs:
           $vsPath = (& $vswhere -latest -products * -property installationPath).Trim()
           Write-Host "Existing VS install path: $vsPath"
 
+          $logPath = Join-Path $env:RUNNER_TEMP "vs_atl_install.log"
           $installArgs = @(
             "modify",
             "--installPath", $vsPath,
             "--add", "Microsoft.VisualStudio.Component.VC.ATL",
             "--quiet",
-            "--norestart"
+            "--norestart",
+            "--log", $logPath
           )
           Write-Host "Running: $installer $($installArgs -join ' ')"
           $p = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
           Write-Host "vs_installer exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
+            if (Test-Path $logPath) {
+              Write-Host "----- vs_installer log (tail) -----"
+              Get-Content $logPath -Tail 300
+              Write-Host "------------------------------------"
+            } else {
+              Write-Host "No log file found at $logPath"
+            }
             throw "vs_installer failed with exit code $($p.ExitCode)"
           }
 
