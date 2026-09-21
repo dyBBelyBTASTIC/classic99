@@ -46,9 +46,34 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Install ATL (needed for atlstr.h / CString)
-        shell: cmd
+        shell: pwsh
         run: |
-          choco install visualstudio2022-workload-vctools -y --no-progress --package-parameters "--add Microsoft.VisualStudio.Component.VC.ATL --includeRecommended --passive --norestart"
+          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $vsPath = (& $vswhere -latest -products * -property installationPath).Trim()
+          Write-Host "Existing VS install path: $vsPath"
+
+          $installArgs = @(
+            "modify",
+            "--installPath", $vsPath,
+            "--add", "Microsoft.VisualStudio.Component.VC.ATL",
+            "--quiet",
+            "--norestart"
+          )
+          Write-Host "Running: $installer $($installArgs -join ' ')"
+          $p = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+          Write-Host "vs_installer exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
+            throw "vs_installer failed with exit code $($p.ExitCode)"
+          }
+
+          # Fail fast, right here, if it didn't actually take - don't wait
+          # for a wall of C1083 errors three steps later to find out.
+          $atl = Get-ChildItem -Path $vsPath -Filter atlstr.h -Recurse -ErrorAction SilentlyContinue
+          if (-not $atl) {
+            throw "atlstr.h still not found anywhere under $vsPath after modify"
+          }
+          Write-Host "Confirmed: $($atl[0].FullName)"
 
       - name: Build classic99.sln (Release|${{ matrix.platform }})
         run: >
