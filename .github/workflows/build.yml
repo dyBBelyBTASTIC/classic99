@@ -53,7 +53,7 @@ jobs:
         shell: cmd
         run: >
           choco install visualstudio2022-workload-vctools -y --no-progress
-          --package-parameters "--add Microsoft.VisualStudio.Component.VC.ATL --includeRecommended --quiet --norestart"
+          --package-parameters "--add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.ATLMFC --includeRecommended --quiet --norestart"
 
       - name: Locate MSBuild (the instance that actually has ATL)
         id: msbuild
