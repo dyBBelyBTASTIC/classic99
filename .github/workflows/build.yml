@@ -66,7 +66,16 @@ jobs:
 
           $target = $null
           foreach ($inst in $instances) {
-            $hit = Get-ChildItem -Path $inst.installationPath -Filter atlstr.h -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            # Check the ONE real location the toolset actually uses -
+            # VC\Tools\MSVC\<ver>\atlmfc\include\atlstr.h - rather than an
+            # unrestricted recursive search over the whole install tree.
+            # A big "Enterprise" edition bundles a huge amount of unrelated
+            # stuff (samples, SDKs, cached packages, docs) and a loose
+            # recursive search can find a same-named file that isn't the
+            # real toolset header, giving a false "yes, ATL is here".
+            $hit = Get-ChildItem -Path (Join-Path $inst.installationPath "VC\Tools\MSVC") -Filter atlstr.h -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\atlmfc\\include\\atlstr\.h$' } |
+              Select-Object -First 1
             if ($hit) {
               Write-Host "ATL found under: $($inst.installationPath) -> $($hit.FullName)"
               $target = $inst
