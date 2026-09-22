@@ -775,6 +775,13 @@
       <AdditionalIncludeDirectories>console</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
+  <!-- Ship the -cart reference list next to the .exe in every configuration -->
+  <ItemDefinitionGroup>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)console\cartridges.txt" "$(OutDir)cartridges.txt"</Command>
+      <Message>Copying cartridges.txt to output directory</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="addons\F18A.cpp" />
     <ClCompile Include="addons\gigaFlash.cpp">
