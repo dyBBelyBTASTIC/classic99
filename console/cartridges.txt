@@ -80,3 +80,40 @@ via -cart until a matching entry is added to g_CartAliases in Tiemul.cpp
 (and to this file, to keep it accurate). This is deliberate: it keeps
 every -cart name an exact, unambiguous, hand-chosen match rather than
 something auto-generated from the display name.
+
+
+Loading your OWN cart images ("-rom <path>")
+---------------------------------------------
+-cart only knows about the fixed set of Apps/Games built into
+cartpack.dll, listed above. To load your own ROM/GROM dump from disk
+instead, use the separate, older "-rom" switch:
+
+    classic99.exe -rom "C:\carts\somegame.bin"
+
+This is the same thing as picking Cartridge > User > Open... from the
+menu - it does not go through the -cart short-name table at all, so any
+file on disk works, not just the ones listed in this file.
+
+Classic99 figures out what kind of image it's looking at from the
+LAST LETTER of the filename, before the extension (the classic "V9T9"
+naming convention):
+
+    ...C.bin   8K cartridge ROM
+    ...D.bin   8K bank-2 / XB ROM
+    ...G.bin   cartridge GROM
+    ...9.bin   inverted 379 ROM      (...3.bin also works)
+    ...8.bin   non-inverted 378 ROM
+    ...N.bin   non-volatile 4K MiniMem RAM
+    (no extension at all)   assumed to be a non-inverted 378 ROM
+    (anything else)         also falls back to non-inverted 378 ROM
+
+So for a multi-file cart, name the pieces to match, e.g.:
+    Munchman-C.bin   (8K ROM)
+    Munchman-G.bin   (GROM)
+and point -rom at whichever one you want loaded first; only one path is
+taken per -rom, so multi-bank carts still need the rest picked up
+through the normal cartridge dialog if more than one file is required.
+
+-cart and -rom can be combined with each other in principle, but since
+they both ultimately set "what's mounted at startup", whichever one
+Classic99 processes last wins - don't rely on using both together.
