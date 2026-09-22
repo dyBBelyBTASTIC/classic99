@@ -1,0 +1,82 @@
+Classic99 - "-cart" command line switch
+========================================
+
+Use "-cart <name>" on the command line to automatically mount one of the
+built-in Apps or Games (the ones normally found under the Cartridge menu)
+when Classic99 starts, instead of picking it from the menu by hand.
+
+Example:
+    classic99.exe -cart turboforth
+    classic99.exe -cart parsec -fullscreen
+
+The match against <name> is EXACT and case-insensitive - there is no
+substring or "closest match" guessing. If you type a name that isn't in
+the list below exactly, Classic99 will just start up normally (whatever
+cart was loaded last session, or none) and write a note to the debug log
+saying the name wasn't recognized.
+
+This list is generated from the same table Classic99 uses internally
+(g_CartAliases in Tiemul.cpp), so it will never drift out of sync with
+what the -cart switch actually accepts.
+
+
+Cartridge > Apps
+-----------------------------------------------------------------
+  -cart name            Full name shown in the menu
+-----------------------------------------------------------------
+  demo                  Demonstration
+  diag                  Diagnostics
+  ea                    Editor/Assembler
+  xb                    Extended BASIC
+  fbforth               fbForth 2.0:13 by Lee Stewart
+  homefinance           Home Finance
+  minimemory            Mini Memory
+  pcode                 P-Code Card
+  rxb                   RXB 2026 by Rich Gilbertson
+  te2                   Terminal Emulator 2
+  logo                  TI Logo ][
+  workshop              TI Workshop (379)
+  turboforth            TurboForth 1.2.1 by Mark Wills
+  xb27                  XB2.7 Suite by Tony Knerr
+  xb29                  XB2.9 GEM by Harry Wilhelm
+
+
+Cartridge > Games
+-----------------------------------------------------------------
+  -cart name            Full name shown in the menu
+-----------------------------------------------------------------
+  alpiner               Alpiner
+  amazeing              A-Maze-Ing
+  blackjackpoker        BlackJack&Poker
+  carwars               Car Wars
+  chisholmtrail         Chisholm Trail
+  dontmesswithtexasdemo Don't Mess With Texas Demo
+  football              Football
+  herox                 HeroX
+  hustle                Hustle
+  wumpus                Hunt the Wumpus
+  mindchallengers       Mind Challengers
+  minestorm             Mine Storm
+  munchman              Munch Man
+  parsec                Parsec
+  phoenixwright         Phoenix Wright Turnabout Storm
+  rickdangerous         Rick Dangerous
+  scottadams            Scott Adam's Adventure
+  stranger              Stranger
+  superspaceacer        Super Space Acer 2024
+  taipan                Taipan
+  thunderforce          Thunder Force III Tribute
+  invaders              TI Invaders
+  tombstonecity         Tombstone City
+  tunnelsofdoom         Tunnels of Doom
+  videochess            Video Chess
+  zombiemotif           Zombie MOTIF
+
+
+Adding new carts
+-----------------
+If a future cartpack.dll adds new Apps or Games, they won't be reachable
+via -cart until a matching entry is added to g_CartAliases in Tiemul.cpp
+(and to this file, to keep it accurate). This is deliberate: it keeps
+every -cart name an exact, unambiguous, hand-chosen match rather than
+something auto-generated from the display name.

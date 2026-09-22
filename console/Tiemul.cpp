@@ -221,6 +221,8 @@ bool bIgnoreConsoleBreakpointHits = false;
 CRITICAL_SECTION debugCS;
 char g_cmdLine[512];
 int g_fCmdLineFullScreen = 0;								// -fullscreen command line switch: force full screen (DirectDraw exclusive) mode at startup
+char g_cmdLineCart[256] = "";								// -cart <name> command line switch: short name of a built-in cart/app to auto-mount at startup (see cartridges.txt)
+bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex);	// forward decl - full definition is further down, near ParseCommandLine()
 extern bool bWarmBoot;
 extern FILE *fpDisasm;          // file pointer for logging disassembly, if active
 extern int disasmLogType;       // 0 = all, 1 = exclude < 2000, valid only when fpDisasm is not NULL
@@ -807,6 +809,17 @@ void ReadConfig() {
 	nCartGroup=	GetPrivateProfileInt("roms",	"cartgroup",	nCartGroup,	INIFILE);
 	// Cartridge index (depends on group)
 	nCart=		GetPrivateProfileInt("roms",	"cartidx",		nCart,		INIFILE);
+	// -cart on the command line overrides whatever was saved from last session
+	if (g_cmdLineCart[0] != '\0') {
+		int nFoundGroup, nFoundIdx;
+		if (ResolveCartAlias(g_cmdLineCart, &nFoundGroup, &nFoundIdx)) {
+			nCartGroup = nFoundGroup;
+			nCart = nFoundIdx;
+			debug_write("Command line: mounting '-cart %s' (group %d, index %d)", g_cmdLineCart, nFoundGroup, nFoundIdx);
+		} else {
+			debug_write("Command line: '-cart %s' is not a recognized name - see cartridges.txt (next to the .exe) for valid names. Ignoring.", g_cmdLineCart);
+		}
+	}
 	// User cartridges
 	memset(nLoadedUserCarts, 0, sizeof(nLoadedUserCarts));
 	nLoadedUserGroups=0;
@@ -1334,8 +1347,109 @@ void RestoreWindowPosition() {
 //
 // To add a new switch: add an "else if" below, and a global to hold
 // the result. Simple on/off flags can follow -fullscreen as a template.
+///////////////////////////////////
+// Cartridge command line aliases
+///////////////////////////////////
+// Short, typeable names for the built-in Apps/Games shipped inside
+// cartpack.dll, for use with "-cart <name>" on the command line. This is
+// a straight, case-insensitive EXACT match against the short name below -
+// no substring search, no fuzzy "closest match" guessing. Every cart gets
+// exactly one short name, and every short name is unique, so there is
+// never any ambiguity about which cart "-cart <name>" refers to.
+//
+// This table is also the source for cartridges.txt (shipped next to the
+// .exe) - if you add a cart here, please keep that file in sync.
+//
+// nGroup: 0 = Apps, 1 = Games (matches nCartGroup elsewhere in this file)
+struct CartAlias {
+	const char *szShort;		// what the user types after -cart
+	int         nGroup;		// 0=Apps, 1=Games
+	const char *szFullName;	// must match an Apps[]/Games[] szName exactly
+};
+
+struct CartAlias g_CartAliases[] = {
+	// --- Apps ---
+	{ "demo",           0, "Demonstration" },
+	{ "diag",           0, "Diagnostics" },
+	{ "ea",             0, "Editor/Assembler" },
+	{ "xb",             0, "Extended BASIC" },
+	{ "fbforth",        0, "fbForth 2.0:13 by Lee Stewart" },
+	{ "homefinance",    0, "Home Finance" },
+	{ "minimemory",     0, "Mini Memory" },
+	{ "pcode",          0, "P-Code Card" },
+	{ "rxb",            0, "RXB 2026 by Rich Gilbertson" },
+	{ "te2",            0, "Terminal Emulator 2" },
+	{ "logo",           0, "TI Logo ][" },
+	{ "workshop",       0, "TI Workshop (379)" },
+	{ "turboforth",     0, "TurboForth 1.2.1 by Mark Wills" },
+	{ "xb27",           0, "XB2.7 Suite by Tony Knerr" },
+	{ "xb29",           0, "XB2.9 GEM by Harry Wilhelm" },
+
+	// --- Games ---
+	{ "alpiner",              1, "Alpiner" },
+	{ "amazeing",             1, "A-Maze-Ing" },
+	{ "blackjackpoker",       1, "BlackJack&&Poker" },
+	{ "carwars",              1, "Car Wars" },
+	{ "chisholmtrail",        1, "Chisholm Trail" },
+	{ "dontmesswithtexasdemo",1, "Don't Mess With Texas Demo" },
+	{ "football",             1, "Football" },
+	{ "herox",                1, "HeroX" },
+	{ "hustle",               1, "Hustle" },
+	{ "wumpus",               1, "Hunt the Wumpus" },
+	{ "mindchallengers",      1, "Mind Challengers" },
+	{ "minestorm",            1, "Mine Storm" },
+	{ "munchman",             1, "Munch Man" },
+	{ "parsec",               1, "Parsec" },
+	{ "phoenixwright",        1, "Phoenix Wright Turnabout Storm" },
+	{ "rickdangerous",        1, "Rick Dangerous" },
+	{ "scottadams",           1, "Scott Adam's Adventure" },
+	{ "stranger",             1, "Stranger" },
+	{ "superspaceacer",       1, "Super Space Acer 2024" },
+	{ "taipan",               1, "Taipan" },
+	{ "thunderforce",         1, "Thunder Force III Tribute" },
+	{ "invaders",             1, "TI Invaders" },
+	{ "tombstonecity",        1, "Tombstone City" },
+	{ "tunnelsofdoom",        1, "Tunnels of Doom" },
+	{ "videochess",           1, "Video Chess" },
+	{ "zombiemotif",          1, "Zombie MOTIF" },
+};
+
+// Resolves a -cart short name to a (group, index) pair against whatever
+// is actually loaded in Apps[]/Games[] right now. Returns true only on
+// an exact, unambiguous match. No substring matching, no "did you mean".
+bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex) {
+	for (size_t aliasIdx = 0; aliasIdx < sizeof(g_CartAliases)/sizeof(g_CartAliases[0]); ++aliasIdx) {
+		struct CartAlias *pAlias = &g_CartAliases[aliasIdx];
+		if (0 != _stricmp(szShortName, pAlias->szShort)) {
+			continue;
+		}
+
+		// found the short name - now find its current index in the
+		// live Apps[]/Games[] array (don't hardcode index numbers,
+		// since cartpack.dll's own array order is the source of truth)
+		struct CARTS *pArray = (0 == pAlias->nGroup) ? Apps : Games;
+		int nCount = (0 == pAlias->nGroup) ? (get_app_count ? get_app_count() : 0)
+		                                    : (get_game_count ? get_game_count() : 0);
+		if (NULL == pArray) {
+			return false;
+		}
+		for (int idx = 0; idx < nCount; ++idx) {
+			if (0 == _stricmp(pArray[idx].szName, pAlias->szFullName)) {
+				*pGroup = pAlias->nGroup;
+				*pIndex = idx;
+				return true;
+			}
+		}
+		// short name is known, but its target cart isn't actually
+		// loaded right now (cartpack.dll mismatch) - treat as not found
+		return false;
+	}
+	return false;
+}
+
 void ParseCommandLine() {
 	g_fCmdLineFullScreen = 0;
+	g_cmdLineCart[0] = '\0';
 
 	int argc = 0;
 	LPWSTR *argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1356,6 +1470,21 @@ void ParseCommandLine() {
 		if ((0 == _stricmp(arg, "-fullscreen")) || (0 == _stricmp(arg, "/fullscreen"))) {
 			g_fCmdLineFullScreen = 1;
 			debug_write("Command line: full screen requested");
+			continue;
+		}
+
+		if ((0 == _stricmp(arg, "-cart")) || (0 == _stricmp(arg, "/cart"))) {
+			if (idx+1 < argc) {
+				char cartArg[512];
+				WideCharToMultiByte(CP_ACP, 0, argvW[idx+1], -1, cartArg, sizeof(cartArg), NULL, NULL);
+				cartArg[sizeof(cartArg)-1] = '\0';
+				strncpy(g_cmdLineCart, cartArg, sizeof(g_cmdLineCart));
+				g_cmdLineCart[sizeof(g_cmdLineCart)-1] = '\0';
+				debug_write("Command line: -cart %s requested", g_cmdLineCart);
+				++idx;	// consume the name too, it's not a separate argument
+			} else {
+				debug_write("Command line: -cart given with no name after it - ignoring. See cartridges.txt for valid names.");
+			}
 			continue;
 		}
 
