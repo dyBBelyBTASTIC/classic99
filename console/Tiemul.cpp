@@ -223,6 +223,7 @@ char g_cmdLine[512];
 int g_fCmdLineFullScreen = 0;								// -fullscreen command line switch: force full screen (DirectDraw exclusive) mode at startup
 char g_cmdLineCart[256] = "";								// -cart <name> command line switch: short name of a built-in cart/app to auto-mount at startup (see cartridges.txt)
 bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex);	// forward decl - full definition is further down, near ParseCommandLine()
+char g_cmdLineDsk[MAX_DRIVES-RESERVED_DRIVES][MAX_PATH];	// -dskN <path> command line switch: mount <path> as an Image (DSK) file on drive N (0-9) at startup
 extern bool bWarmBoot;
 extern FILE *fpDisasm;          // file pointer for logging disassembly, if active
 extern int disasmLogType;       // 0 = all, 1 = exclude < 2000, valid only when fpDisasm is not NULL
@@ -677,6 +678,37 @@ void ReadConfig() {
 					if (hSub != NULL) {
 						ModifyMenu(hSub, 0, MF_BYPOSITION | MF_STRING, ID_DISK_DSK0_SETDSK0+idx, csTmp.GetBuffer());
 					}
+				}
+			}
+		}
+	}
+	// -dskN on the command line overrides whatever was set up above (from
+	// the INI, or the hardcoded defaults), same rule as -cart / -fullscreen.
+	// This mirrors exactly what picking "Image (DSK)" and a path in the
+	// Set DSKn dialog does (see DiskBoxProc's DISK_SECTOR case) - just
+	// without a dialog box to read options from, so options are left at
+	// ImageDisk's own defaults (equivalent to a freshly opened dialog
+	// where nothing was touched before pressing OK).
+	{
+		HMENU hMenu = GetMenu(myWnd);
+		if (NULL != hMenu) {
+			hMenu = GetSubMenu(hMenu, 4);	// disk menu
+		}
+		for (int nDrive = 0; nDrive < MAX_DRIVES-RESERVED_DRIVES; ++nDrive) {
+			if ('\0' == g_cmdLineDsk[nDrive][0]) {
+				continue;
+			}
+			if (NULL != pDriveType[nDrive]) {
+				delete pDriveType[nDrive];
+				pDriveType[nDrive] = NULL;
+			}
+			pDriveType[nDrive] = new ImageDisk;
+			pDriveType[nDrive]->SetPath(g_cmdLineDsk[nDrive]);
+			debug_write("Command line: mounted '-dsk%d %s' as an Image (DSK) file", nDrive, g_cmdLineDsk[nDrive]);
+			if (hMenu != NULL) {
+				HMENU hSub = GetSubMenu(hMenu, nDrive);
+				if (hSub != NULL) {
+					ModifyMenu(hSub, 0, MF_BYPOSITION | MF_STRING, ID_DISK_DSK0_SETDSK0+nDrive, g_cmdLineDsk[nDrive]);
 				}
 			}
 		}
@@ -1450,6 +1482,9 @@ bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex) {
 void ParseCommandLine() {
 	g_fCmdLineFullScreen = 0;
 	g_cmdLineCart[0] = '\0';
+	for (int nDrive = 0; nDrive < MAX_DRIVES-RESERVED_DRIVES; ++nDrive) {
+		g_cmdLineDsk[nDrive][0] = '\0';
+	}
 
 	int argc = 0;
 	LPWSTR *argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1484,6 +1519,25 @@ void ParseCommandLine() {
 				++idx;	// consume the name too, it's not a separate argument
 			} else {
 				debug_write("Command line: -cart given with no name after it - ignoring. See cartridges.txt for valid names.");
+			}
+			continue;
+		}
+
+		// -dsk0 through -dsk9: mount <path> as an Image (DSK) file on that drive
+		if ((strlen(arg) == 5) &&
+		    ((0 == _strnicmp(arg, "-dsk", 4)) || (0 == _strnicmp(arg, "/dsk", 4))) &&
+		    (arg[4] >= '0') && (arg[4] <= '9')) {
+			int nDrive = arg[4] - '0';
+			if (idx+1 < argc) {
+				char pathArg[MAX_PATH];
+				WideCharToMultiByte(CP_ACP, 0, argvW[idx+1], -1, pathArg, sizeof(pathArg), NULL, NULL);
+				pathArg[sizeof(pathArg)-1] = '\0';
+				strncpy(g_cmdLineDsk[nDrive], pathArg, sizeof(g_cmdLineDsk[nDrive]));
+				g_cmdLineDsk[nDrive][sizeof(g_cmdLineDsk[nDrive])-1] = '\0';
+				debug_write("Command line: -dsk%d %s requested", nDrive, g_cmdLineDsk[nDrive]);
+				++idx;	// consume the path too, it's not a separate argument
+			} else {
+				debug_write("Command line: -dsk%d given with no path after it - ignoring.", nDrive);
 			}
 			continue;
 		}
