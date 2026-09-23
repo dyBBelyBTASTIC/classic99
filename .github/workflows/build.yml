@@ -55,7 +55,7 @@ jobs:
           choco install visualstudio2022-workload-vctools -y --no-progress
           --package-parameters "--add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.ATLMFC --includeRecommended --quiet --norestart"
 
-      - name: Locate MSBuild (the instance that actually has ATL)
+      - name: Locate MSBuild (the BuildTools instance we just installed)
         id: msbuild
         shell: pwsh
         run: |
@@ -64,33 +64,25 @@ jobs:
           Write-Host "Found $($instances.Count) VS instance(s):"
           $instances | ForEach-Object { Write-Host " - $($_.installationPath) ($($_.displayName) $($_.installationVersion))" }
 
-          $target = $null
-          foreach ($inst in $instances) {
-            # Check the ONE real location the toolset actually uses -
-            # VC\Tools\MSVC\<ver>\atlmfc\include\atlstr.h - rather than an
-            # unrestricted recursive search over the whole install tree.
-            # A big "Enterprise" edition bundles a huge amount of unrelated
-            # stuff (samples, SDKs, cached packages, docs) and a loose
-            # recursive search can find a same-named file that isn't the
-            # real toolset header, giving a false "yes, ATL is here".
-            $hit = Get-ChildItem -Path (Join-Path $inst.installationPath "VC\Tools\MSVC") -Filter atlstr.h -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\atlmfc\\include\\atlstr\.h$' } |
-              Select-Object -First 1
-            if ($hit) {
-              Write-Host "ATL found under: $($inst.installationPath) -> $($hit.FullName)"
-              $target = $inst
-              break
-            }
-          }
+          # Don't search for "evidence" of ATL across every instance - a
+          # big pre-existing Enterprise install can have more than one
+          # MSVC toolset version folder on disk, and a stray/partial one
+          # can pass a path-shaped check even though it isn't the version
+          # actually selected at build time (this bit us more than once).
+          # Instead, target the specific instance we just installed via
+          # choco, by its known install path, since we control exactly
+          # which components went into it.
+          $target = $instances | Where-Object { $_.installationPath -match '\\BuildTools$' } | Select-Object -First 1
           if (-not $target) {
-            throw "No VS instance with ATL (atlstr.h) found among the $($instances.Count) instance(s) above"
+            throw "Could not find the choco-installed BuildTools instance among the $($instances.Count) instance(s) above"
           }
+          Write-Host "Using BuildTools instance: $($target.installationPath)"
 
           $msbuildPath = Get-ChildItem -Path $target.installationPath -Filter MSBuild.exe -Recurse -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '\\Current\\Bin\\' -or $_.FullName -match '\\Bin\\' } |
             Select-Object -First 1 -ExpandProperty FullName
           if (-not $msbuildPath) {
-            throw "Found a VS instance with ATL at $($target.installationPath) but couldn't locate MSBuild.exe under it"
+            throw "Found the BuildTools instance at $($target.installationPath) but couldn't locate MSBuild.exe under it"
           }
           Write-Host "Using MSBuild: $msbuildPath"
           echo "path=$msbuildPath" >> $env:GITHUB_OUTPUT
