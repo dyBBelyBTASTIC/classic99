@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # We deliberately don't touch the pre-existing VS install on the
       # runner (C:\Program Files\Microsoft Visual Studio\18\Enterprise) -
@@ -110,7 +110,7 @@ jobs:
           }
 
       - name: Upload build output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: classic99-${{ matrix.platform }}-release
           path: |
