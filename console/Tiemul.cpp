@@ -224,6 +224,7 @@ int g_fCmdLineFullScreen = 0;								// -fullscreen command line switch: force f
 char g_cmdLineCart[256] = "";								// -cart <name> command line switch: short name of a built-in cart/app to auto-mount at startup (see cartridges.txt)
 bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex);	// forward decl - full definition is further down, near ParseCommandLine()
 char g_cmdLineDsk[MAX_DRIVES-RESERVED_DRIVES][MAX_PATH];	// -dskN <path> command line switch: mount <path> as an Image (DSK) file on drive N (0-9) at startup
+char g_cmdLineAutotype[MAX_PATH] = "";						// -autotype <path> command line switch: read a text file and "type" it in via the same engine as Edit > Paste
 extern bool bWarmBoot;
 extern FILE *fpDisasm;          // file pointer for logging disassembly, if active
 extern int disasmLogType;       // 0 = all, 1 = exclude < 2000, valid only when fpDisasm is not NULL
@@ -1485,6 +1486,7 @@ void ParseCommandLine() {
 	for (int nDrive = 0; nDrive < MAX_DRIVES-RESERVED_DRIVES; ++nDrive) {
 		g_cmdLineDsk[nDrive][0] = '\0';
 	}
+	g_cmdLineAutotype[0] = '\0';
 
 	int argc = 0;
 	LPWSTR *argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1538,6 +1540,21 @@ void ParseCommandLine() {
 				++idx;	// consume the path too, it's not a separate argument
 			} else {
 				debug_write("Command line: -dsk%d given with no path after it - ignoring.", nDrive);
+			}
+			continue;
+		}
+
+		if ((0 == _stricmp(arg, "-autotype")) || (0 == _stricmp(arg, "/autotype"))) {
+			if (idx+1 < argc) {
+				char pathArg[MAX_PATH];
+				WideCharToMultiByte(CP_ACP, 0, argvW[idx+1], -1, pathArg, sizeof(pathArg), NULL, NULL);
+				pathArg[sizeof(pathArg)-1] = '\0';
+				strncpy(g_cmdLineAutotype, pathArg, sizeof(g_cmdLineAutotype));
+				g_cmdLineAutotype[sizeof(g_cmdLineAutotype)-1] = '\0';
+				debug_write("Command line: -autotype %s requested", g_cmdLineAutotype);
+				++idx;	// consume the path too, it's not a separate argument
+			} else {
+				debug_write("Command line: -autotype given with no path after it - ignoring.");
 			}
 			continue;
 		}
@@ -2070,6 +2087,46 @@ int WINAPI WinMain( HINSTANCE hInst, HINSTANCE hInPrevInstance, LPSTR lpCmdLine,
 
 	// Initialize emulated keyboard
 	init_kb();
+
+	// -autotype on the command line: read a text file and feed it through
+	// the same engine as Edit > Paste (Ctrl+F1) - a plain line break in
+	// the file is typed as a single Enter keystroke, exactly like pasting
+	// multi-line text already works. Set here, before the CPU thread
+	// starts: the paste is only actually consumed by a CPU PC hook that
+	// only fires once the emulation is running, so queuing it up early
+	// is equivalent to hitting Ctrl+F1 the instant the window appears.
+	if (g_cmdLineAutotype[0] != '\0') {
+		FILE *fp = fopen(g_cmdLineAutotype, "rb");
+		if (NULL == fp) {
+			debug_write("Command line: -autotype file '%s' could not be opened - ignoring.", g_cmdLineAutotype);
+		} else {
+			fseek(fp, 0, SEEK_END);
+			long nLen = ftell(fp);
+			fseek(fp, 0, SEEK_SET);
+			if (nLen > 0) {
+				char *pAutoTypeBuf = (char*)malloc(nLen+1);
+				if (NULL != pAutoTypeBuf) {
+					size_t nRead = fread(pAutoTypeBuf, 1, nLen, fp);
+					pAutoTypeBuf[nRead] = '\0';
+					if (NULL != PasteString) {
+						// shouldn't be possible this early at startup, but
+						// don't leak or clobber an existing one if it is
+						free(PasteString);
+					}
+					PasteString = pAutoTypeBuf;
+					PasteIndex = PasteString;
+					PasteCount = -1;				// matches the fresh-paste state set at startup
+					PasteStringHackBuffer = false;	// no XB space-stripping/long-line hack for -autotype
+					debug_write("Command line: -autotype loaded '%s' (%d bytes)", g_cmdLineAutotype, (int)nRead);
+				} else {
+					debug_write("Command line: -autotype failed to allocate memory for '%s' - ignoring.", g_cmdLineAutotype);
+				}
+			} else {
+				debug_write("Command line: -autotype file '%s' is empty - ignoring.", g_cmdLineAutotype);
+			}
+			fclose(fp);
+		}
+	}
 
 	// start sound
 	debug_write("Starting Sound");
