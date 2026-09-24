@@ -432,6 +432,16 @@ char *PasteIndex;
 bool PasteStringHackBuffer=false;					// forces long inputs under BASIC/XB (may cause crashes)
 int PasteCount;
 
+// -autotype only: a parallel array, same length as PasteString, marking
+// positions after which extra real-time delay should be inserted before
+// the next character is typed (used at line boundaries). NULL for every
+// other way of setting PasteString (manual paste, TYPE_KEYS carts) - the
+// draining loop below treats NULL as "no extra delay", so those paths are
+// completely unaffected by any of this.
+bool *g_pAutoTypeDelayAfter = NULL;
+DWORD g_dwAutoTypeDelayMs = 250;					// -autotypedelay <ms>: default chosen empirically - see BuildAutoTypeBuffer's comment
+DWORD g_dwAutoTypeResumeTime = 0;					// GetTickCount() value to wait for before typing the next character; 0 = not currently waiting
+
 unsigned long myThread;								// timer thread
 CRITICAL_SECTION VideoCS;							// Video CS
 CRITICAL_SECTION DebugCS;							// Debug CS
@@ -1502,11 +1512,27 @@ bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex) {
 // the literal characters "[enter]" at its very end would be misread as
 // the control marker. This is an accepted tradeoff for what -autotype is
 // for (driving menus and commands), not a general-purpose paste.
-char* BuildAutoTypeBuffer(const char *pRaw, size_t nRawLen) {
+//
+// Also marks, via *ppDelayAfter (a bool array the same length as the
+// returned buffer), every position after which the extra -autotypedelay
+// pause should be inserted (currently: every line boundary). This is
+// necessary, not just cosmetic: the ROM needs a moment of real elapsed
+// time to actually finish transitioning between screens/menus, which an
+// unwanted Enter keystroke used to provide by accident before line
+// breaks stopped sending one automatically.
+char* BuildAutoTypeBuffer(const char *pRaw, size_t nRawLen, bool **ppDelayAfter) {
 	char *pOut = (char*)malloc(nRawLen+1);
 	if (NULL == pOut) {
+		*ppDelayAfter = NULL;
 		return NULL;
 	}
+	bool *pDelay = (bool*)malloc(nRawLen+1);
+	if (NULL == pDelay) {
+		free(pOut);
+		*ppDelayAfter = NULL;
+		return NULL;
+	}
+	memset(pDelay, 0, nRawLen+1);
 	size_t nOut = 0;
 	size_t nPos = 0;
 	const char *szMarker = "[enter]";
@@ -1547,6 +1573,13 @@ char* BuildAutoTypeBuffer(const char *pRaw, size_t nRawLen) {
 		}
 		// no marker -> nothing at all between this line and the next
 
+		// mark the end of this line (whatever was last typed, even if
+		// nothing was typed on an empty line) as a delay point, as long
+		// as it's not also the very end of the whole file
+		if ((nOut > 0) && (nLineEnd < nRawLen)) {
+			pDelay[nOut-1] = true;
+		}
+
 		// skip past the line terminator (CRLF, CR, or LF) to the next line
 		nPos = nLineEnd;
 		if ((nPos < nRawLen) && ('\r' == pRaw[nPos])) {
@@ -1558,6 +1591,7 @@ char* BuildAutoTypeBuffer(const char *pRaw, size_t nRawLen) {
 	}
 
 	pOut[nOut] = '\0';
+	*ppDelayAfter = pDelay;
 	return pOut;
 }
 
@@ -1636,6 +1670,25 @@ void ParseCommandLine() {
 				++idx;	// consume the path too, it's not a separate argument
 			} else {
 				debug_write("Command line: -autotype given with no path after it - ignoring.");
+			}
+			continue;
+		}
+
+		if ((0 == _stricmp(arg, "-autotypedelay")) || (0 == _stricmp(arg, "/autotypedelay"))) {
+			if (idx+1 < argc) {
+				char delayArg[64];
+				WideCharToMultiByte(CP_ACP, 0, argvW[idx+1], -1, delayArg, sizeof(delayArg), NULL, NULL);
+				delayArg[sizeof(delayArg)-1] = '\0';
+				int nDelay = atoi(delayArg);
+				if (nDelay >= 0) {
+					g_dwAutoTypeDelayMs = (DWORD)nDelay;
+					debug_write("Command line: -autotypedelay %d ms requested", nDelay);
+				} else {
+					debug_write("Command line: -autotypedelay given a negative value - ignoring, keeping default of %d ms", (int)g_dwAutoTypeDelayMs);
+				}
+				++idx;	// consume the value too, it's not a separate argument
+			} else {
+				debug_write("Command line: -autotypedelay given with no value after it - ignoring.");
 			}
 			continue;
 		}
@@ -2188,7 +2241,8 @@ int WINAPI WinMain( HINSTANCE hInst, HINSTANCE hInPrevInstance, LPSTR lpCmdLine,
 				char *pRawBuf = (char*)malloc(nLen);
 				if (NULL != pRawBuf) {
 					size_t nRead = fread(pRawBuf, 1, nLen, fp);
-					char *pAutoTypeBuf = BuildAutoTypeBuffer(pRawBuf, nRead);
+					bool *pDelayAfter = NULL;
+					char *pAutoTypeBuf = BuildAutoTypeBuffer(pRawBuf, nRead, &pDelayAfter);
 					free(pRawBuf);
 					if (NULL != pAutoTypeBuf) {
 						if (NULL != PasteString) {
@@ -2196,11 +2250,16 @@ int WINAPI WinMain( HINSTANCE hInst, HINSTANCE hInPrevInstance, LPSTR lpCmdLine,
 							// don't leak or clobber an existing one if it is
 							free(PasteString);
 						}
+						if (NULL != g_pAutoTypeDelayAfter) {
+							free(g_pAutoTypeDelayAfter);
+						}
 						PasteString = pAutoTypeBuf;
 						PasteIndex = PasteString;
 						PasteCount = -1;				// matches the fresh-paste state set at startup
 						PasteStringHackBuffer = false;	// no XB space-stripping/long-line hack for -autotype
-						debug_write("Command line: -autotype loaded '%s' (%d bytes read, %d keystrokes)", g_cmdLineAutotype, (int)nRead, (int)strlen(pAutoTypeBuf));
+						g_pAutoTypeDelayAfter = pDelayAfter;
+						g_dwAutoTypeResumeTime = 0;
+						debug_write("Command line: -autotype loaded '%s' (%d bytes read, %d keystrokes, %d ms delay between lines)", g_cmdLineAutotype, (int)nRead, (int)strlen(pAutoTypeBuf), (int)g_dwAutoTypeDelayMs);
 					} else {
 						debug_write("Command line: -autotype failed to allocate memory for '%s' - ignoring.", g_cmdLineAutotype);
 					}
@@ -3352,6 +3411,13 @@ void LoadOneImg(struct IMG *pImg, char *szFork) {
 					free(PasteString);
 					PasteStringHackBuffer=false;
 				}
+				if (NULL != g_pAutoTypeDelayAfter) {
+					// this isn't an -autotype paste, so any leftover delay
+					// tracking from a previous one must not apply here
+					free(g_pAutoTypeDelayAfter);
+					g_pAutoTypeDelayAfter = NULL;
+				}
+				g_dwAutoTypeResumeTime = 0;
 				char *p;
 				while (p = strstr(pImg->szFileName, "\\n")) {
 					*p='\n';
@@ -4425,7 +4491,9 @@ void do1()
 
                     // TODO: all the writes in here will have CPU timing implications, but pasting happens
                     // in overdrive anyway, so I guess it doesn't matter
-					if ((rcpubyte(0x8374, ACCESS_FREE)==0)||(rcpubyte(0x8374, ACCESS_FREE)==5)) {		// Check for pastestring - note keyboard is still active
+					if (((rcpubyte(0x8374, ACCESS_FREE)==0)||(rcpubyte(0x8374, ACCESS_FREE)==5)) &&
+					    ((0 == g_dwAutoTypeResumeTime) || ((long)(GetTickCount()-g_dwAutoTypeResumeTime) >= 0))) {		// Check for pastestring - note keyboard is still active. -autotype may also be waiting out an extra real-time delay here.
+						g_dwAutoTypeResumeTime = 0;
 						if (*PasteIndex) {
 							if (*PasteIndex==10) {
 								// CRLF to CR, LF to CR
@@ -4454,6 +4522,17 @@ void do1()
 								if (PasteCount<1) {
 									wcpubyte(0x837c, rcpubyte(0x837c, ACCESS_FREE)|0x20);
 								}
+								// -autotype only: if this position is a line boundary,
+								// hold off on the next character for a bit of extra
+								// real time, so the ROM has a chance to actually
+								// finish transitioning between screens/menus before
+								// the next keystroke arrives.
+								if ((NULL != g_pAutoTypeDelayAfter) && (g_dwAutoTypeDelayMs > 0)) {
+									size_t nAutoTypeOffset = PasteIndex - PasteString;
+									if (g_pAutoTypeDelayAfter[nAutoTypeOffset]) {
+										g_dwAutoTypeResumeTime = GetTickCount() + g_dwAutoTypeDelayMs;
+									}
+								}
 								PasteCount++;
 								PasteIndex++;
 							} else {
@@ -4467,6 +4546,11 @@ void do1()
 							free(PasteString);
 							PasteString=NULL;
 							PasteStringHackBuffer=false;
+							if (NULL != g_pAutoTypeDelayAfter) {
+								free(g_pAutoTypeDelayAfter);
+								g_pAutoTypeDelayAfter = NULL;
+							}
+							g_dwAutoTypeResumeTime = 0;
 							SetWindowText(myWnd, szDefaultWindowText);
 
 							switch (nOldSpeed) {
