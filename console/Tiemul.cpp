@@ -1480,6 +1480,87 @@ bool ResolveCartAlias(const char *szShortName, int *pGroup, int *pIndex) {
 	return false;
 }
 
+///////////////////////////////////
+// -autotype line handling
+///////////////////////////////////
+// Builds a Paste-ready buffer out of a raw -autotype text file. This is
+// deliberately DIFFERENT from how a normal Edit > Paste treats line
+// breaks, and only applies here, not to clipboard pasting:
+//
+//   - A plain line break by itself sends NOTHING - no keystroke at all -
+//     between one line and the next. This matters because most TI-99
+//     menus (the title screen, cartridge selection, etc) are answered
+//     with a single keypress and no Enter; sending an unwanted Enter on
+//     those screens produces an unrecognized-key beep and desyncs the
+//     rest of the script.
+//   - To actually press Enter after a line (e.g. after typing a filename
+//     that needs submitting), end that line with the literal marker
+//     "[enter]" (case-insensitive). It is stripped out of what gets
+//     typed and replaced with a single real Enter keystroke.
+//
+// Because of this, a line of real program text that happens to contain
+// the literal characters "[enter]" at its very end would be misread as
+// the control marker. This is an accepted tradeoff for what -autotype is
+// for (driving menus and commands), not a general-purpose paste.
+char* BuildAutoTypeBuffer(const char *pRaw, size_t nRawLen) {
+	char *pOut = (char*)malloc(nRawLen+1);
+	if (NULL == pOut) {
+		return NULL;
+	}
+	size_t nOut = 0;
+	size_t nPos = 0;
+	const char *szMarker = "[enter]";
+	const size_t nMarkerLen = 7;	// strlen("[enter]")
+
+	while (nPos < nRawLen) {
+		// find the end of this line (a bare CR or LF)
+		size_t nLineStart = nPos;
+		size_t nLineEnd = nPos;
+		while ((nLineEnd < nRawLen) && ('\r' != pRaw[nLineEnd]) && ('\n' != pRaw[nLineEnd])) {
+			++nLineEnd;
+		}
+		size_t nLineLen = nLineEnd - nLineStart;
+
+		// trim trailing spaces/tabs just for the purpose of detecting the
+		// marker, so "DSK1.ROM1 [enter]" (with a stray trailing space)
+		// still works as expected
+		size_t nTrim = nLineLen;
+		while ((nTrim > 0) && ((' ' == pRaw[nLineStart+nTrim-1]) || ('\t' == pRaw[nLineStart+nTrim-1]))) {
+			--nTrim;
+		}
+
+		bool bHasMarker = false;
+		size_t nContentLen = nLineLen;
+		if (nTrim >= nMarkerLen) {
+			if (0 == _strnicmp(pRaw+nLineStart+nTrim-nMarkerLen, szMarker, nMarkerLen)) {
+				bHasMarker = true;
+				nContentLen = nTrim - nMarkerLen;
+			}
+		}
+
+		// copy the (possibly shortened) line content as-is
+		memcpy(pOut+nOut, pRaw+nLineStart, nContentLen);
+		nOut += nContentLen;
+
+		if (bHasMarker) {
+			pOut[nOut++] = 0x0D;	// exactly one real Enter keystroke
+		}
+		// no marker -> nothing at all between this line and the next
+
+		// skip past the line terminator (CRLF, CR, or LF) to the next line
+		nPos = nLineEnd;
+		if ((nPos < nRawLen) && ('\r' == pRaw[nPos])) {
+			++nPos;
+		}
+		if ((nPos < nRawLen) && ('\n' == pRaw[nPos])) {
+			++nPos;
+		}
+	}
+
+	pOut[nOut] = '\0';
+	return pOut;
+}
+
 void ParseCommandLine() {
 	g_fCmdLineFullScreen = 0;
 	g_cmdLineCart[0] = '\0';
@@ -2104,20 +2185,25 @@ int WINAPI WinMain( HINSTANCE hInst, HINSTANCE hInPrevInstance, LPSTR lpCmdLine,
 			long nLen = ftell(fp);
 			fseek(fp, 0, SEEK_SET);
 			if (nLen > 0) {
-				char *pAutoTypeBuf = (char*)malloc(nLen+1);
-				if (NULL != pAutoTypeBuf) {
-					size_t nRead = fread(pAutoTypeBuf, 1, nLen, fp);
-					pAutoTypeBuf[nRead] = '\0';
-					if (NULL != PasteString) {
-						// shouldn't be possible this early at startup, but
-						// don't leak or clobber an existing one if it is
-						free(PasteString);
+				char *pRawBuf = (char*)malloc(nLen);
+				if (NULL != pRawBuf) {
+					size_t nRead = fread(pRawBuf, 1, nLen, fp);
+					char *pAutoTypeBuf = BuildAutoTypeBuffer(pRawBuf, nRead);
+					free(pRawBuf);
+					if (NULL != pAutoTypeBuf) {
+						if (NULL != PasteString) {
+							// shouldn't be possible this early at startup, but
+							// don't leak or clobber an existing one if it is
+							free(PasteString);
+						}
+						PasteString = pAutoTypeBuf;
+						PasteIndex = PasteString;
+						PasteCount = -1;				// matches the fresh-paste state set at startup
+						PasteStringHackBuffer = false;	// no XB space-stripping/long-line hack for -autotype
+						debug_write("Command line: -autotype loaded '%s' (%d bytes read, %d keystrokes)", g_cmdLineAutotype, (int)nRead, (int)strlen(pAutoTypeBuf));
+					} else {
+						debug_write("Command line: -autotype failed to allocate memory for '%s' - ignoring.", g_cmdLineAutotype);
 					}
-					PasteString = pAutoTypeBuf;
-					PasteIndex = PasteString;
-					PasteCount = -1;				// matches the fresh-paste state set at startup
-					PasteStringHackBuffer = false;	// no XB space-stripping/long-line hack for -autotype
-					debug_write("Command line: -autotype loaded '%s' (%d bytes)", g_cmdLineAutotype, (int)nRead);
 				} else {
 					debug_write("Command line: -autotype failed to allocate memory for '%s' - ignoring.", g_cmdLineAutotype);
 				}
